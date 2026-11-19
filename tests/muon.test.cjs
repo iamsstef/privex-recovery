@@ -70,8 +70,33 @@ test('tries next trusted gateway and does not send credentials', async () => {
   };
   const result = await fetchSignature(context, fakeFetch);
   assert.equal(visited.length, 2);
-  assert.equal(result.gateway, 'muon-oracle4.rasa.capital');
+  assert.equal(result.gateway, 'muon-oracle3.rasa.capital');
   assert.equal(visited[0].opts.credentials, 'omit');
   assert.equal(visited[1].opts.cache, 'no-store');
   assert.equal(result.sig.upnl, -1000000000000000000n);
+});
+test('legacy uPnl_A method returns a signature without pendingBalance',async()=>{
+  const payload=makePayload();
+  delete payload.result.data.result.pendingBalance;
+  const urls=[];
+  const result=await fetchSignature(context,async url=>{urls.push(new URL(url));return {ok:true,status:200,text:async()=>JSON.stringify(payload)};},'uPnl_A');
+  assert.equal(urls[0].searchParams.get('method'),'uPnl_A');
+  assert.equal(result.method,'uPnl_A');
+  assert.equal(result.sig.upnl,-1000000000000000000n);
+  assert.equal('pendingBalance' in result.sig,false);
+});
+test('HTTP 400 details from response body are retained',async()=>{
+  let count=0;
+  await assert.rejects(fetchSignature(context,async()=>{count++;return {ok:false,status:400,text:async()=>JSON.stringify({success:false,error:{message:'bad request',data:'The server would not process the request'}})};}),err=>{
+    assert.equal(count,4);
+    assert.match(err.message,/HTTP 400: bad request/);
+    assert.match(err.message,/would not process/);
+    return true;
+  });
+});
+test('safe signatures never assume a zero pending balance',()=>{
+  const payload=makePayload();
+  delete payload.result.data.result.pendingBalance;
+  assert.throws(()=>parseResponse(payload,context,'uPnl_A_withPendingBalance'),/pendingBalance/);
+  assert.ok(parseResponse(payload,context,'uPnl_A').upnl<0n);
 });

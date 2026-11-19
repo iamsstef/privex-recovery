@@ -87,3 +87,7 @@ The source files in this repository are released under MIT. SYMMIO contracts and
 ## Muon client tests
 
 `node --test tests/muon.test.cjs` runs offline parser, expiry, account/chain and fallback tests using synthetic data. They do not establish live COTI gateway availability or successful real withdrawals.
+
+## Muon fallback diagnostic (2026-11-20)
+
+The user-supplied `uPnl_A_withPendingBalance` call returned HTTP 400 with a generic `bad request` error from `muon-oracle1`. This does not prove its params were malformed or that the network lacks oracle support. The frontend now checks Muon gateways 2, 3, 4, and 1, and includes the structured JSON error when available. If the safe signature cannot be obtained, it queries SYMMIO Core `isLegacyDeallocateDeprecated()` and tries `uPnl_A` with `deallocate()` only if that getter explicitly returns `false`. These are different signature structs and cannot be interchanged. Every path still requires an on-chain `eth_call` and gas estimate before any wallet submission. Gateway availability and a successful live COTI withdrawal are unverified.

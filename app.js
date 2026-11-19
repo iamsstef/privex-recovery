@@ -42,6 +42,7 @@
   const CORE_ABI = [
     'function getCollateral() view returns (address)',
     'function getMuonConfig() view returns (uint256 upnlValidTime,uint256 priceValidTime)',
+    'function isLegacyDeallocateDeprecated() view returns (bool)',
     'function balanceOf(address user) view returns (uint256)',
     'function allocatedBalanceOfPartyA(address partyA) view returns (uint256)',
     'function getWithdrawableTime(address user) view returns (uint256)',
@@ -50,6 +51,7 @@
     'function partyAPendingQuotesCount(address partyA) view returns (uint256)',
     'function pauseState() view returns (bool globalPaused,bool liquidationPaused,bool accountingPaused,bool partyBActionsPaused,bool partyAActionsPaused,bool internalTransferPaused,bool externalTransferPaused,bool emergencyMode,bool partyBOpenPositionsPaused)',
     'function safeDeallocate(uint256 amount,(bytes reqId,uint256 timestamp,int256 upnl,uint256 pendingBalance,bytes gatewaySignature,(uint256 signature,address owner,address nonce) sigs) upnlSig)',
+    'function deallocate(uint256 amount,(bytes reqId,uint256 timestamp,int256 upnl,bytes gatewaySignature,(uint256 signature,address owner,address nonce) sigs) upnlSig)',
     `function initiateWithdraw(${PART}[] parts,bool speedUp,bytes providerData) returns (uint256 requestId,uint256 cooldownEndTime)`,
     'function finalizeWithdrawRequest(address user,uint256 requestId)',
     'function getLastWithdrawRequestId(address user) view returns (uint256)',
@@ -353,7 +355,7 @@
     $('drawerCooldown').textContent = a.cooldown === null ? 'Unknown' : (Number(a.cooldown)*1000 <= Date.now() ? 'Elapsed' : `Until ${fmtTime(a.cooldown)}`);
     $('amountUnit').textContent=state.meta.symbol;
     $('actionDescription').textContent = mode==='deallocate'
-      ? 'Uses a Muon signature. Amount depends on available margin and pending commitments. Resets the withdrawal cooldown.'
+      ? 'Requires a Muon signature. The legacy route is tried only if enabled on-chain. Resets the withdrawal cooldown.'
       : mode==='request'
         ? 'Creates a withdrawal request to your wallet. Funds remain locked until finalized or canceled. Requires a second transaction.'
         : 'Legacy withdrawal to your connected wallet. If disabled, try a withdrawal request.';
@@ -401,12 +403,29 @@
       assert(window.PrivexMuon?.fetchSignature,'Muon client unavailable. Reload the page.');
       const [muonConfig,latest]=await Promise.all([c.getMuonConfig(),state.read.getBlock('latest')]);
       assert(latest,'Unable to read the latest COTI block.');
-      const oracle=await window.PrivexMuon.fetchSignature({
+      const muonParams={
         partyA:a.address,core:CONFIG.core,chainId:CONFIG.chainId,
         blockTimestamp:latest.timestamp,upnlValidTime:muonConfig.upnlValidTime,
-      });
-      const data=c.interface.encodeFunctionData('safeDeallocate',[units18,oracle.sig]);
-      action={mode,contract:m,method:'_call',args:[a.address,[data]],target:CONFIG.multiAccount,oracle:oracle.gateway};
+      };
+      let oracle, deallocationMethod='safeDeallocate';
+      try {
+        oracle=await window.PrivexMuon.fetchSignature(muonParams);
+      }catch(primaryError){
+        // Only use the legacy path if the core explicitly reports it is enabled.
+        let disabled;
+        try { disabled=await core().isLegacyDeallocateDeprecated(); }
+        catch(readError){
+          throw new Error(`Safe Muon failed: ${failText(primaryError)}. Legacy status unavailable: ${failText(readError)}`);
+        }
+        if(disabled) throw new Error(`Safe Muon failed: ${failText(primaryError)}. Legacy deallocation disabled on-chain.`);
+        deallocationMethod='deallocate';
+        try { oracle=await window.PrivexMuon.fetchSignature(muonParams,fetch,'uPnl_A'); }
+        catch(fallbackError){
+          throw new Error(`Safe Muon failed: ${failText(primaryError)}. Legacy Muon failed: ${failText(fallbackError)}`);
+        }
+      }
+      const data=c.interface.encodeFunctionData(deallocationMethod,[units18,oracle.sig]);
+      action={mode,contract:m,method:'_call',args:[a.address,[data]],target:CONFIG.multiAccount,oracle:oracle.gateway,deallocationMethod};
     }else throw new Error('Unsupported action.');
     await action.contract[action.method].staticCall(...action.args); // eth_call: no funds move here
     return {...action,account:a.address,amount:units,wallet:state.wallet};
@@ -421,9 +440,9 @@
     try {
       const action=await buildAction();
       const gas=await action.contract[action.method].estimateGas(...action.args);
-      state.preview={account:action.account,wallet:action.wallet,mode:action.mode,amount:action.amount};
+      state.preview={account:action.account,wallet:action.wallet,mode:action.mode,amount:action.amount,deallocationMethod:action.deallocationMethod||null};
       $('previewResult').className='preview-result success';
-      $('previewResult').textContent=`Simulation passed.\nAmount: ${fmtCollateral(action.amount)} ${state.meta.symbol}\nTo: ${action.mode==='deallocate'?'same sub-account':action.wallet}\nContract: ${ellipsis(action.target)}\nEstimated gas: ${gas.toString()}${action.oracle?'\nMuon: '+action.oracle:''}\nNo transaction has been sent.`;
+      $('previewResult').textContent=`Simulation passed.\nAmount: ${fmtCollateral(action.amount)} ${state.meta.symbol}\nTo: ${action.mode==='deallocate'?'same sub-account':action.wallet}\nContract: ${ellipsis(action.target)}\nEstimated gas: ${gas.toString()}${action.deallocationMethod?'\nMethod: '+action.deallocationMethod:''}${action.oracle?'\nMuon: '+action.oracle:''}\nNo transaction has been sent.`;
       $('submitBtn').disabled=false;
     }catch(e){
       $('previewResult').className='preview-result error';
@@ -438,7 +457,7 @@
     try {
       // Re-simulate at the time of signing so stale account state never authorizes a different action.
       const action=await buildAction();
-      assert(same(action.account,state.preview.account) && same(action.wallet,state.preview.wallet) && action.mode===state.preview.mode && action.amount===state.preview.amount,'Transaction details changed. Please simulate again.');
+      assert(same(action.account,state.preview.account) && same(action.wallet,state.preview.wallet) && action.mode===state.preview.mode && action.amount===state.preview.amount && (action.deallocationMethod||null)===state.preview.deallocationMethod,'Transaction details changed. Please simulate again.');
       $('previewResult').className='preview-result';
       $('previewResult').textContent='Confirm the transaction shown by your wallet. Verify the contract and amount.';
       const tx=await action.contract[action.method](...action.args);
