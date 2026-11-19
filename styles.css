@@ -5,3 +5,5 @@
 .compact-hero h1{font-size:clamp(28px,3.3vw,39px);letter-spacing:-1.15px;line-height:1.15;font-weight:630;margin:0 0 7px}
 .compact-hero>p{font-size:13px;line-height:1.5;max-width:none;margin:0 0 17px}
 .compact-hero .notice{max-width:760px}
+
+.account-warning{margin:9px 0 2px;font-size:11px;color:var(--amber);line-height:1.5}

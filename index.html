@@ -68,7 +68,7 @@
   <aside class="drawer" id="drawer" aria-label="Account action" aria-modal="true" role="dialog" hidden>
     <div class="drawer-top"><div><div class="overline">TRANSACTION</div><h2 id="drawerTitle">Withdraw funds</h2></div><button class="icon-btn" id="closeDrawer" aria-label="Close">×</button></div>
     <div class="drawer-body"><div class="account-ref"><span>Sub-account</span><code id="drawerAccount">--</code><span id="drawerAccountName"></span></div>
-      <label for="actionMode">Transaction</label><select id="actionMode"><option value="direct">Direct withdrawal (legacy)</option><option value="request">Create classic withdrawal request</option><option value="deallocate">Deallocate idle margin</option></select>
+      <label for="actionMode">Transaction</label><select id="actionMode"><option value="direct">Direct withdrawal (legacy)</option><option value="request">Create classic withdrawal request</option><option value="deallocate">Deallocate (restricted)</option></select>
       <div class="amount-heading"><label for="amountInput">Amount</label><button id="maxBtn" class="text-btn">Use max</button></div><div class="amount-wrap"><input id="amountInput" inputmode="decimal" autocomplete="off" placeholder="0.00"><span id="amountUnit">Collateral</span></div>
       <div class="tx-facts"><div><span>Available</span><strong id="drawerAvailable">--</strong></div><div><span>Allocated</span><strong id="drawerAllocated">--</strong></div><div><span>Destination</span><code id="drawerDestination">--</code></div><div><span>Withdrawal cooldown</span><span id="drawerCooldown">--</span></div></div>
       <p class="drawer-desc" id="actionDescription"></p>

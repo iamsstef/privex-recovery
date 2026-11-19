@@ -41,6 +41,7 @@
   const REQUEST = `(uint256 id,address user,${PART}[] parts,uint256 timestamp,uint256 cooldownEndTime,uint8 status,bool speedUp,bool isCooldownModified,address provider,bool isPureVirtual,bytes providerData,uint256 totalAmount,uint256 totalVirtualAmount)`;
   const CORE_ABI = [
     'function getCollateral() view returns (address)',
+    'function hasRole(address user,bytes32 role) view returns (bool)',
     'function balanceOf(address user) view returns (uint256)',
     'function allocatedBalanceOfPartyA(address partyA) view returns (uint256)',
     'function getWithdrawableTime(address user) view returns (uint256)',
@@ -180,6 +181,7 @@
       c.getWithdrawableTime(addr), c.isSuspended(addr),
       c.partyAPositionsCount(addr), c.partyAPendingQuotesCount(addr),
       c.getLastWithdrawRequestId(addr),
+      c.hasRole(addr, state.eth.id('BALANCE_SETTLER_ROLE')),
     ]);
     const val = i => calls[i].status === 'fulfilled' ? calls[i].value : null;
     const owner = val(0);
@@ -187,7 +189,7 @@
       address:addr, name:shortOwner(name) || 'Trading sub-account', registry,
       owner:owner ? asAddress(owner) : null,
       available:val(1), allocated:val(2), cooldown:val(3), suspended:val(4),
-      positions:val(5), pendingQuotes:val(6), lastRequest:val(7), requests:[],
+      positions:val(5), pendingQuotes:val(6), lastRequest:val(7), settlerRole:val(8), requests:[],
     };
     if (profile.lastRequest !== null && profile.lastRequest > 0n) {
       const last = profile.lastRequest;
@@ -283,11 +285,16 @@
     const own = !!state.wallet && a.owner && same(state.wallet,a.owner);
     const mayWrite = own && state.meta && !state.meta.isPaused && !state.meta.flags[0] && !state.meta.flags[2];
     const ownerNote = a.owner ? ellipsis(a.owner) : 'Unknown';
+    const canZeroUpnl = mayWrite && a.settlerRole === true && a.allocated !== null && a.allocated > 0n;
+    const marginNotice = a.allocated !== null && a.allocated > 0n && a.settlerRole !== true
+      ? '<div class="account-warning">Deallocation needs a Muon signature. This option is not available yet.</div>'
+      : '';
     const pending = a.requests.filter(r=>r.status === 0n || r.status === 1n || r.status === 4n || r.status === 6n);
     element.innerHTML = `
       <div class="account-top"><div><div class="account-title">${H(a.name)}</div><div class="account-address">${H(a.address)}</div></div></div>
       <div class="account-numbers"><div><small>Available</small><strong>${fmtAmount(a.available)}</strong></div><div><small>Allocated</small><strong>${fmtAmount(a.allocated)}</strong></div><div><small>Open positions</small><strong>${a.positions===null?'Unknown':a.positions.toString()}</strong></div></div>
-      <div class="account-bottom"><span class="meta">Owner: ${H(ownerNote)}${a.suspended?' · Suspended':''} · Pending quotes: ${a.pendingQuotes===null?'?':a.pendingQuotes}</span><button class="btn secondary" data-action="deallocate" ${mayWrite && a.allocated!==null && a.allocated>0n?'':'disabled'}>Deallocate</button><button class="btn primary" data-action="direct" ${mayWrite && a.available!==null && a.available>0n?'':'disabled'}>Withdraw</button></div>
+      <div class="account-bottom"><span class="meta">Owner: ${H(ownerNote)}${a.suspended?' · Suspended':''} · Pending quotes: ${a.pendingQuotes===null?'?':a.pendingQuotes}</span><button class="btn secondary" data-action="deallocate" ${canZeroUpnl?'':'disabled'} title="${a.settlerRole === true?'Deallocate idle margin':'Requires BALANCE_SETTLER_ROLE'}">Deallocate</button><button class="btn primary" data-action="direct" ${mayWrite && a.available!==null && a.available>0n?'':'disabled'}>Withdraw</button></div>
+      ${marginNotice}
       ${pending.length?`<div class="pending-requests"><div class="pending-header">Withdrawal requests (${pending.length} of ${a.lastRequest?.toString()||'?' } total)</div></div>`:''}`;
     const bottom = element.querySelector('.account-bottom');
     bottom.querySelectorAll('button').forEach(btn => btn.addEventListener('click',()=>openAction(a,btn.dataset.action)));
@@ -326,6 +333,7 @@
     $('drawerTitle').textContent = mode==='deallocate' ? 'Deallocate margin' : 'Withdraw funds';
     $('drawerAccount').textContent = a.address;
     $('drawerAccountName').textContent = a.name;
+    $('actionMode').querySelector('option[value="deallocate"]').disabled = a.settlerRole !== true;
     $('actionMode').value = mode;
     $('amountInput').value = '';
     $('previewResult').textContent='';
@@ -351,7 +359,7 @@
     $('drawerCooldown').textContent = a.cooldown === null ? 'Unknown' : (Number(a.cooldown)*1000 <= Date.now() ? 'Elapsed' : `Until ${fmtTime(a.cooldown)}`);
     $('amountUnit').textContent=state.meta.symbol;
     $('actionDescription').textContent = mode==='deallocate'
-      ? 'Moves allocated margin to available balance. Requires no open positions or pending quotes. Resets the withdrawal cooldown.'
+      ? 'Restricted deallocation. Requires BALANCE_SETTLER_ROLE, no open positions or pending quotes. Resets the withdrawal cooldown.'
       : mode==='request'
         ? 'Creates a withdrawal request to your wallet. Funds remain locked until finalized or canceled. Requires a second transaction.'
         : 'Legacy withdrawal to your connected wallet. If disabled, try a withdrawal request.';
@@ -396,6 +404,7 @@
       action={mode,contract:m,method:'_call',args:[a.address,[data]],target:CONFIG.multiAccount};
     }else if(mode==='deallocate') {
       assert(units18<=allocated,'Amount exceeds the allocated balance.');
+      assert(await core().hasRole(a.address,state.eth.id('BALANCE_SETTLER_ROLE')),'This account lacks BALANCE_SETTLER_ROLE. Deallocation requires a Muon signature, which is not integrated yet.');
       const [open,pending]=await Promise.all([c.partyAPositionsCount(a.address),c.partyAPendingQuotesCount(a.address)]);
       assert(open===0n && pending===0n,'Deallocation without a Muon signature requires no open positions or pending quotes.');
       const data=c.interface.encodeFunctionData('zeroUpnlDeallocate',[units18]);
