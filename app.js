@@ -31,7 +31,9 @@
     'function delegatedAccesses(address account,address target,bytes4 selector) view returns (bool)',
     'function revokeProposalTimestamp(address account,address target,bytes4 selector) view returns (uint256)',
     'function withdrawFromAccount(address account,uint256 amount)',
-    'function _call(address account,bytes[] callDatas) returns (bytes[])',
+    // PriveX COTI MultiAccount uses SYMMIO symmioMultiAccount_2: _call returns no data.
+    // Ignoring outputs also works if a newer implementation returns bytes[].
+    'function _call(address account,bytes[] callDatas)',
     'event DelegateAccess(address account,address target,bytes4 selector,bool state)',
     'event DelegateAccesses(address account,address target,bytes4[] selector,bool state)',
     'event ProposeToRevokeAccesses(address account,address target,bytes4[] selector)',
