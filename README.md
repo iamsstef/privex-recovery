@@ -31,7 +31,7 @@ Official contract source consulted:
 - Read each account's owner, available collateral, allocated collateral, open-position count, pending quote count, suspension status, withdrawal cooldown and last 15 withdrawal requests.
 - Check delegated function permissions by scanning `DelegateAccess*` events and reading current `delegatedAccesses()` storage. Optional manual target/selector lookup; **event scans are partial unless the user starts at the deployment block**.
 - Owner-authorized **direct legacy withdrawal**, with a read-only `staticCall` and gas estimation before wallet signing.
-- **Restricted zero-uPnL deallocation**: requires `BALANCE_SETTLER_ROLE` for the sub-account calling the core. The UI checks `hasRole` and disables this action otherwise. Standard `deallocate` / `safeDeallocate` require a fresh Muon signature and are not implemented yet.
+- Owner-authorized **Muon-backed safe deallocation**: fetches a fresh `uPnl_A_withPendingBalance` signature from two documented SYMMIO gateways, validates the account, chain, structure and expiry, then routes `safeDeallocate` through MultiAccount. Transaction simulation and gas estimation are required before signing.
 - Owner-authorized **classic withdrawal request** through `MultiAccount._call(subAccount, [encoded initiateWithdraw(...)])`, pointing the recipient **only at the connected owner** and using **no providers**.
 - Finalize a pending classic withdrawal request once its cooldown expires; other provider-managed withdrawal types are read-only.
 
@@ -40,13 +40,14 @@ The app rechecks ownership, the real wallet network, expected collateral / core 
 ## Known limitations and caveats
 
 1. **Agent accounts outside legacy MultiAccount**: a virtual account, different owner, agent vault, separate Account Layer or another chain cannot be discovered or withdrawn by this adapter. A manually entered *legacy* sub-account is read-only unless `owners()` proves the connected wallet controls it.
-2. **Open positions / locked margin**: current SYMMIO source restricts `zeroUpnlDeallocate` to `BALANCE_SETTLER_ROLE`. Most sub-accounts lack this role. Regular deallocation requires a valid Muon attestation, and open positions may need settlement. Allocated margin cannot be withdrawn through this tool without a supported deallocation path.
+2. **Open positions / locked margin**: `zeroUpnlDeallocate` requires `BALANCE_SETTLER_ROLE`, so the tool uses `safeDeallocate` with a Muon signature instead. The core still requires sufficient margin, including pending off-chain commitments. Open positions and unsettled losses can limit how much may be deallocated.
 3. **Pause, suspension, deprecated functions, missing underlying collateral**: the UI cannot bypass contract restrictions or make insolvent contracts solvent. A failed static call intentionally blocks its transaction button.
 4. **Withdrawal requests**: standard requests are two transactions (`initiateWithdraw`, then `finalizeWithdrawRequest`). Only the most recent 15 requests per account are inspected. More historical requests would need a pagination interface.
 5. **RPC/CORS/rate limits**: GitHub Pages browsers must be able to make `eth_call` to COTI's RPC. If the RPC does not permit browser access, a compatible injected wallet can serve as fallback. Historical delegation scans can be rate-limited.
 6. **No full historical event enumeration by default**: delegation mapping keys are not enumerable. The default search window is only the most recent 40,000 blocks. To scan farther back, set **Scan from block** to a prior block, down to `639223`. A zero-result partial scan never proves no permissions exist.
-7. **CDN dependency**: `ethers@6.15.0` is loaded by a pinned version from jsDelivr. Before large-scale public deployment, vendor the reviewed library into the repository and apply an integrity hash / security review. GitHub Pages and the CDN can log IP requests, and the public RPC can see queried addresses even though the app sends no telemetry.
-8. **Not formally audited**: read-only `eth_call` success, simulated transaction success, token balances and expected contract addresses do not establish economic safety or solvency.
+7. **Muon gateway availability**: the two documented Rasa gateways (`muon-oracle1.rasa.capital`, `muon-oracle4.rasa.capital`) have not been independently confirmed live for COTI in this environment. Browsers must support cross-origin requests. Each gateway receives the public account address, chain ID and core address. If both fail or the core rejects the signature, the transaction stays disabled.
+8. **CDN dependency**: `ethers@6.15.0` is loaded by a pinned version from jsDelivr. Before large-scale public deployment, vendor the reviewed library into the repository and apply an integrity hash / security review. GitHub Pages and the CDN can log IP requests, and the public RPC can see queried addresses even though the app sends no telemetry.
+9. **Not formally audited**: read-only `eth_call` success, simulated transaction success, token balances and expected contract addresses do not establish economic safety or solvency.
 
 ## GitHub Pages deployment
 
@@ -83,3 +84,6 @@ Static hosting requires no build step. To view files locally you can use `python
 ## License
 
 The source files in this repository are released under MIT. SYMMIO contracts and external dependencies retain their separate licenses; no SYMMIO contract code is copied into this project.
+## Muon client tests
+
+`node --test tests/muon.test.cjs` runs offline parser, expiry, account/chain and fallback tests using synthetic data. They do not establish live COTI gateway availability or successful real withdrawals.
