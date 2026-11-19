@@ -1,0 +1,3 @@
+# Experimental recovery tool; do not index before independent review.
+User-agent: *
+Disallow: /
