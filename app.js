@@ -61,8 +61,8 @@
 
   const $ = id => document.getElementById(id);
   const H = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const ellipsis = s => s ? `${s.slice(0, 6)}…${s.slice(-5)}` : '—';
-  const fmtTime = n => n ? new Date(Number(n) * 1000).toLocaleString(undefined, {dateStyle:'medium',timeStyle:'short'}) : '—';
+  const ellipsis = s => s ? `${s.slice(0, 6)}…${s.slice(-5)}` : '--';
+  const fmtTime = n => n ? new Date(Number(n) * 1000).toLocaleString(undefined, {dateStyle:'medium',timeStyle:'short'}) : '--';
   const STATUS = ['Pending','Provider accepted','Provider rejected','Completed','Cancel requested','Cancelled','Suspended'];
   const state = {
     eth: null, read: null, walletProvider: null, wallet: null,
@@ -167,7 +167,7 @@
     try { symbol = String(await token.symbol()).slice(0,20); } catch (_) { /* metadata not required */ }
     const flags = [...pauseFlags].map(Boolean);
     state.meta = {symbol, isPaused:Boolean(isPaused), flags, verifiedAt:Date.now()};
-    setNetwork(isPaused ? 'Contract paused · COTI' : 'COTI Mainnet · verified', !isPaused);
+    setNetwork('COTI Mainnet', !isPaused);
     return state.meta;
   }
 
@@ -207,7 +207,7 @@
     $('inspectBtn').disabled = true;
     $('refreshBtn').disabled = true;
     state.preview = null;
-    showStatus('Verifying COTI deployment and loading sub-accounts…');
+    showStatus('Loading accounts...');
     try {
       await verifyDeployment();
       const wallet = asAddress(address);
@@ -230,17 +230,17 @@
       renderDashboard();
       $('dashboard').hidden = false;
       $('refreshBtn').disabled = false;
-      $('connectionBadge').textContent = state.wallet && same(state.wallet,wallet) ? 'Wallet connected' : 'Watch-only';
+      $('connectionBadge').textContent = state.wallet && same(state.wallet,wallet) ? 'Connected' : 'Watch-only';
       $('connectionBadge').className = state.wallet && same(state.wallet,wallet) ? 'tag good' : 'tag';
-      $('walletInfo').textContent = state.wallet ? `Connected: ${ellipsis(state.wallet)} · Viewing ${ellipsis(wallet)}` : `Viewing ${ellipsis(wallet)} without a wallet connection.`;
+      $('walletInfo').textContent = state.wallet ? `Wallet: ${ellipsis(state.wallet)} | Viewing: ${ellipsis(wallet)}` : `Address: ${ellipsis(wallet)}`;
       const caution = total>limit ? ` Only the first ${limit} of ${total} registered accounts were loaded; manually inspect additional addresses.` : '';
       const warning = state.meta.isPaused || state.meta.flags[0] || state.meta.flags[2] ? ' Contract operations are currently restricted by a pause.' : '';
-      showStatus(`Found ${total} registered legacy sub-account${total===1?'':'s'}. Live collateral: ${state.meta.symbol}. ${caution}${warning}`, warning ? 'error' : 'success');
+      showStatus(`${total} account${total===1?'':'s'} found.${caution}${warning}`, warning ? 'error' : 'success');
     } catch (e) {
       $('dashboard').hidden = true;
       state.preview = null;
       showStatus(failText(e),'error');
-      setNetwork('Connection or validation error',false);
+      setNetwork('COTI Mainnet',false);
     } finally {
       state.loading = false;
       $('inspectBtn').disabled = false;
@@ -257,12 +257,12 @@
     $('totalBalance').textContent = `${fmtAmount(available + allocated)}${suffix}`;
     $('availableBalance').textContent = `${fmtAmount(available)}${suffix}`;
     $('allocatedBalance').textContent = `${fmtAmount(allocated)}${suffix}`;
-    $('balanceSymbol').textContent = `${state.meta.symbol} · SYMMIO internal collateral (not USD valuation)`;
+    $('balanceSymbol').textContent = state.meta.symbol;
     $('accountCount').textContent = `${accounts.length} loaded`;
     const out = $('accountList');
     out.innerHTML = '';
     if (!accounts.length) {
-      out.innerHTML = '<p class="empty-note">No accounts were found under this address in the PriveX legacy MultiAccount registry. Agent funds may be held under a different owner or account system. Try a known sub-account address below.</p>';
+      out.innerHTML = '<p class="empty-note">No sub-accounts found for this address. Accounts on other contracts may not appear here.</p>';
     }
     for (let i=0;i<accounts.length;i++) out.appendChild(renderAccount(accounts[i],i));
     const previous = $('delegationAccount').value;
@@ -274,7 +274,7 @@
       $('delegationAccount').appendChild(option);
     }
     if (accounts.some(a=>same(a.address,previous))) $('delegationAccount').value = previous;
-    $('delegationResults').innerHTML = '<p class="empty-note">Scan events to discover past delegations. A partial scan cannot prove there are no permissions.</p>';
+    $('delegationResults').innerHTML = '<p class="empty-note">Scan events or check a known address. Partial scans may miss earlier delegations.</p>';
   }
 
   function renderAccount(a,index) {
@@ -282,11 +282,10 @@
     element.className = 'account-card';
     const own = !!state.wallet && a.owner && same(state.wallet,a.owner);
     const mayWrite = own && state.meta && !state.meta.isPaused && !state.meta.flags[0] && !state.meta.flags[2];
-    const ownerNote = a.owner ? `${ellipsis(a.owner)}${own?' · connected owner':''}` : 'Ownership unavailable';
-    const agentLike = /\b(agent|bot|ai)\b/i.test(a.name);
+    const ownerNote = a.owner ? ellipsis(a.owner) : 'Unknown';
     const pending = a.requests.filter(r=>r.status === 0n || r.status === 1n || r.status === 4n || r.status === 6n);
     element.innerHTML = `
-      <div class="account-top"><div><div class="account-title">${H(a.name)}</div><div class="account-address">${H(a.address)}</div></div><span class="tag ${agentLike?'good':''}">${agentLike?'Agent-labeled':'Sub-account'}</span></div>
+      <div class="account-top"><div><div class="account-title">${H(a.name)}</div><div class="account-address">${H(a.address)}</div></div></div>
       <div class="account-numbers"><div><small>Available</small><strong>${fmtAmount(a.available)}</strong></div><div><small>Allocated</small><strong>${fmtAmount(a.allocated)}</strong></div><div><small>Open positions</small><strong>${a.positions===null?'Unknown':a.positions.toString()}</strong></div></div>
       <div class="account-bottom"><span class="meta">Owner: ${H(ownerNote)}${a.suspended?' · Suspended':''} · Pending quotes: ${a.pendingQuotes===null?'?':a.pendingQuotes}</span><button class="btn secondary" data-action="deallocate" ${mayWrite && a.allocated!==null && a.allocated>0n?'':'disabled'}>Deallocate</button><button class="btn primary" data-action="direct" ${mayWrite && a.available!==null && a.available>0n?'':'disabled'}>Withdraw</button></div>
       ${pending.length?`<div class="pending-requests"><div class="pending-header">Withdrawal requests (${pending.length} of ${a.lastRequest?.toString()||'?' } total)</div></div>`:''}`;
@@ -352,10 +351,10 @@
     $('drawerCooldown').textContent = a.cooldown === null ? 'Unknown' : (Number(a.cooldown)*1000 <= Date.now() ? 'Elapsed' : `Until ${fmtTime(a.cooldown)}`);
     $('amountUnit').textContent=state.meta.symbol;
     $('actionDescription').textContent = mode==='deallocate'
-      ? 'Moves eligible margin to the available balance. Requires zero open positions and pending quotes. This starts/resets the on-chain withdrawal cooldown.'
+      ? 'Moves allocated margin to available balance. Requires no open positions or pending quotes. Resets the withdrawal cooldown.'
       : mode==='request'
-        ? 'Creates a classic COTI withdrawal request payable only to your connected wallet. This locks the requested collateral until finalization or cancellation. A second transaction is required to finalize.'
-        : 'Attempts the legacy owner-only MultiAccount withdrawal directly to your connected wallet. If deprecated, simulate the classic withdrawal request instead.';
+        ? 'Creates a withdrawal request to your wallet. Funds remain locked until finalized or canceled. Requires a second transaction.'
+        : 'Legacy withdrawal to your connected wallet. If disabled, try a withdrawal request.';
     state.preview=null;
     $('submitBtn').disabled=true;
     $('previewResult').textContent='';
@@ -452,7 +451,7 @@
   }
 
   async function finalizeRequest(a,id) {
-    if(!state.wallet) {showStatus('Connect the owner wallet first.','error');return;}
+    if(!state.wallet) {showStatus('Connect the owning wallet.','error');return;}
     try {
       const signer=await assertWriteReady(a);
       const request=await core().getWithdrawRequests(a.address,id);
@@ -529,7 +528,7 @@
     output.innerHTML='';
     const heading=document.createElement('p');
     heading.className='empty-note';
-    heading.textContent=`Scanned blocks ${from.toLocaleString()}–${to.toLocaleString()} (${items.length} distinct permissions found). Scanning part of the chain does not establish that no other delegations exist.`;
+    heading.textContent=`Scanned blocks ${from.toLocaleString()}-${to.toLocaleString()} (${items.length} distinct permissions found). Scanning part of the chain does not establish that no other delegations exist.`;
     output.appendChild(heading);
     if(!items.length)return;
     for(const p of items){
@@ -563,7 +562,7 @@
       for(let block=start;block<=end;block+=CONFIG.scanChunk){
         if(state.scanCancelled)break;
         const to=Math.min(block+CONFIG.scanChunk-1,end);
-        $('delegationResults').innerHTML=`<p class="empty-note">Scanning blocks ${block.toLocaleString()}–${to.toLocaleString()} / ${end.toLocaleString()}…</p>`;
+        $('delegationResults').innerHTML=`<p class="empty-note">Scanning blocks ${block.toLocaleString()}-${to.toLocaleString()} / ${end.toLocaleString()}…</p>`;
         const logs=await provider.getLogs({address:CONFIG.multiAccount,topics:[topics],fromBlock:block,toBlock:to});
         for(const log of logs){
           try {
@@ -656,7 +655,7 @@
     try{
       await ensureRead();
       await verifyDeployment();
-      $('walletInfo').textContent='Deployment verified. Connect your wallet or inspect an address without connecting.';
+      $('walletInfo').textContent='Connect wallet or enter an address.';
     }catch(e){
       setNetwork('RPC not ready',false);
       showStatus(`Read-only initialization: ${failText(e)}`,'error');

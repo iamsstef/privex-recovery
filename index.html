@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <meta name="robots" content="noindex,nofollow,noarchive">
-  <meta name="description" content="Independent, open-source recovery interface to inspect PriveX's legacy SYMMIO sub-accounts on COTI Mainnet and attempt owner-authorized withdrawals.">
+  <meta name="description" content="COTI account dashboard for PriveX balances, sub-accounts, delegations and withdrawals.">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; connect-src 'self' https://mainnet.coti.io https://mainnet.innovunode.io; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests">
-  <title>PriveX Recovery | Independent on-chain access</title>
+  <title>PriveX Recovery</title>
   <link rel="stylesheet" href="./styles.css">
   <script defer src="https://cdn.jsdelivr.net/npm/ethers@6.15.0/dist/ethers.umd.min.js"></script>
   <script defer src="./app.js"></script>
@@ -18,66 +18,64 @@
     <header class="header">
       <div class="identity">
         <div class="logo" aria-hidden="true"><span>↗</span></div>
-        <div><div class="brand">PriveX <span>Recovery</span></div><div class="brand-sub">Independent · open source · on-chain</div></div>
+        <div class="brand">PriveX <span>Recovery</span></div>
       </div>
       <div class="header-right"><span class="network"><i class="network-dot" id="networkDot"></i><span id="networkStatus">COTI Mainnet</span></span><button id="connectBtn" class="btn primary">Connect wallet</button></div>
     </header>
 
     <main>
-      <section class="hero">
-        <div class="eyebrow"><span class="eyebrow-line"></span> EXPERIMENTAL · SELF-CUSTODY RECOVERY</div>
-        <h1>Your funds.<br><span>Your control.</span></h1>
-        <p>Access supported PriveX trading accounts directly through COTI smart contracts. Inspect balances, delegated permissions and withdrawal eligibility without using the PriveX frontend.</p>
-        <div class="notice" role="note"><span class="notice-icon">!</span><span><strong>Not affiliated with PriveX or SYMMIO. Not yet live-chain validated.</strong> This tool cannot bypass paused contracts, authorization, open positions or missing collateral. Never enter your seed phrase or private key.</span></div>
+      <section class="hero compact-hero">
+        <h1>Accounts</h1>
+        <p>Balances, agent permissions and withdrawals on COTI Mainnet.</p>
+        <div class="notice" role="note"><span class="notice-icon">!</span><span>Experimental. Withdrawals have not been tested with live accounts. Not affiliated with PriveX or SYMMIO. Never enter your seed phrase.</span></div>
       </section>
 
       <section class="panel start-panel">
-        <div class="panel-heading"><div><div class="overline">01 / ACCOUNT ACCESS</div><h2>Find your accounts</h2></div><span id="connectionBadge" class="tag">Not connected</span></div>
-        <div class="search-row"><label class="sr-only" for="addressInput">COTI wallet address</label><input id="addressInput" type="text" spellcheck="false" autocomplete="off" placeholder="Paste a wallet address to inspect without connecting"><button class="btn secondary" id="inspectBtn">Inspect address</button></div>
-        <div class="helper-line"><span id="walletInfo">Connect a wallet to enable owner-authorized transactions.</span><button id="refreshBtn" class="text-btn" disabled>Refresh data ↻</button></div>
+        <div class="panel-heading"><div><div class="overline">ACCOUNT LOOKUP</div><h2>Find accounts</h2></div><span id="connectionBadge" class="tag">Not connected</span></div>
+        <div class="search-row"><label class="sr-only" for="addressInput">COTI wallet address</label><input id="addressInput" type="text" spellcheck="false" autocomplete="off" placeholder="Wallet address (0x...)"><button class="btn secondary" id="inspectBtn">Inspect address</button></div>
+        <div class="helper-line"><span id="walletInfo">Connect wallet to withdraw, or enter an address to inspect.</span><button id="refreshBtn" class="text-btn" disabled>Refresh</button></div>
       </section>
 
       <section id="statusArea" class="status-area" role="status" aria-live="polite" hidden></section>
 
       <section id="dashboard" hidden>
         <section class="summary-grid" aria-label="Account overview">
-          <div class="metric-card"><div class="metric-label">Total on-chain collateral</div><div class="metric-value" id="totalBalance">—</div><div class="metric-foot" id="balanceSymbol">Across discovered sub-accounts</div></div>
-          <div class="metric-card"><div class="metric-label">Available (not allocated)</div><div class="metric-value" id="availableBalance">—</div><div class="metric-foot">Not necessarily withdrawable</div></div>
-          <div class="metric-card"><div class="metric-label">Allocated to positions</div><div class="metric-value" id="allocatedBalance">—</div><div class="metric-foot">Requires eligible deallocation</div></div>
+          <div class="metric-card"><div class="metric-label">Total collateral</div><div class="metric-value" id="totalBalance">--</div><div class="metric-foot" id="balanceSymbol">Across accounts</div></div>
+          <div class="metric-card"><div class="metric-label">Available</div><div class="metric-value" id="availableBalance">--</div><div class="metric-foot">Subject to withdrawal conditions</div></div>
+          <div class="metric-card"><div class="metric-label">Allocated</div><div class="metric-value" id="allocatedBalance">--</div><div class="metric-foot">Margin in use</div></div>
         </section>
 
         <section class="panel accounts-panel">
-          <div class="panel-heading"><div><div class="overline">02 / SYMMIO SUB-ACCOUNTS</div><h2>Trading accounts</h2></div><span class="tag" id="accountCount">0 accounts</span></div>
+          <div class="panel-heading"><div><div class="overline">SUB-ACCOUNTS</div><h2>Trading accounts</h2></div><span class="tag" id="accountCount">0 accounts</span></div>
           <div id="accountList" class="account-list"></div>
-          <div class="manual-inspect"><label for="manualAccount">Can't find an agent account?</label><div class="search-row"><input id="manualAccount" type="text" autocomplete="off" spellcheck="false" placeholder="Inspect a known trading sub-account address"><button id="manualBtn" class="btn secondary">Look up</button></div><p>Manual lookup can inspect a specific legacy sub-account, but it cannot establish ownership of accounts outside this contract.</p></div>
+          <div class="manual-inspect"><label for="manualAccount">Inspect another sub-account</label><div class="search-row"><input id="manualAccount" type="text" autocomplete="off" spellcheck="false" placeholder="Sub-account address (0x...)"><button id="manualBtn" class="btn secondary">Look up</button></div><p>Only sub-accounts registered to this MultiAccount contract are supported.</p></div>
         </section>
 
         <section class="panel" id="delegationPanel">
-          <div class="panel-heading"><div><div class="overline">03 / AGENT PERMISSIONS</div><h2>Delegated access</h2></div><span class="tag">Read-only</span></div>
-          <p class="panel-copy">Delegations aren't enumerable from contract storage. Scan historical delegation events for an account, or check a known agent address and function selector.</p>
-          <div class="delegation-controls"><label for="delegationAccount">Sub-account</label><select id="delegationAccount" aria-label="Sub-account"></select><div class="two-col"><div><label for="fromBlock">Scan from block</label><input id="fromBlock" type="number" min="639223" placeholder="Recent blocks by default"></div><div class="scan-action"><button class="btn secondary" id="scanBtn">Scan delegation events</button><button class="btn ghost" id="stopScanBtn" hidden>Stop</button></div></div></div>
-          <div id="delegationResults" class="result-list"><p class="empty-note">Choose an account to inspect permissions.</p></div>
-          <div class="manual-check"><div class="two-col"><div><label for="targetAddress">Known agent/operator address</label><input id="targetAddress" placeholder="0x..." autocomplete="off" spellcheck="false"></div><div><label for="selectorInput">Function selector (4 bytes)</label><input id="selectorInput" placeholder="0x12345678" autocomplete="off" spellcheck="false"></div></div><button id="checkAccessBtn" class="text-btn">Check this permission ↗</button><div id="manualAccessResult" class="small-result" aria-live="polite"></div></div>
+          <div class="panel-heading"><div><div class="overline">PERMISSIONS</div><h2>Delegations</h2></div></div>
+          <p class="panel-copy">Scan delegation events or check a known operator address and selector.</p>
+          <div class="delegation-controls"><label for="delegationAccount">Sub-account</label><select id="delegationAccount" aria-label="Sub-account"></select><div class="two-col"><div><label for="fromBlock">Scan from block</label><input id="fromBlock" type="number" min="639223" placeholder="Start block"></div><div class="scan-action"><button class="btn secondary" id="scanBtn">Scan delegation events</button><button class="btn ghost" id="stopScanBtn" hidden>Stop</button></div></div></div>
+          <div id="delegationResults" class="result-list"><p class="empty-note">Select a sub-account.</p></div>
+          <div class="manual-check"><div class="two-col"><div><label for="targetAddress">Agent / operator address</label><input id="targetAddress" placeholder="0x..." autocomplete="off" spellcheck="false"></div><div><label for="selectorInput">Function selector (4 bytes)</label><input id="selectorInput" placeholder="0x12345678" autocomplete="off" spellcheck="false"></div></div><button id="checkAccessBtn" class="text-btn">Check permission</button><div id="manualAccessResult" class="small-result" aria-live="polite"></div></div>
         </section>
       </section>
 
-      <section class="footnotes"><div><span class="foot-icon">◇</span><div><strong>Read the transaction before signing.</strong><p>This website only sends transactions requested by you. It never requests token approvals, seed phrases, personal signatures or permission to transfer funds to a third party.</p></div></div><div><span class="foot-icon">⌁</span><div><strong>Contract limitations are real.</strong><p>Some agent accounts may live outside the legacy MultiAccount registry. Balances are internal collateral values, not guaranteed assets; direct withdrawal may be deprecated or blocked.</p></div></div></section>
-      <footer class="footer"><span>COMMUNITY RECOVERY TOOL · NO BACKEND · NO TRACKING</span><div><a target="_blank" rel="noopener noreferrer" href="https://github.com/SYMM-IO/subgraphs/blob/main/configs/perps/coti.json">Deployment registry</a><a target="_blank" rel="noopener noreferrer" href="https://mainnet.cotiscan.io/address/0xbF318724218cED9A3ff7CfC642c71a0CA1952b0F">MultiAccount contract</a></div></footer>
+      <footer class="footer"><span>PriveX Recovery</span><div><a target="_blank" rel="noopener noreferrer" href="https://github.com/SYMM-IO/subgraphs/blob/main/configs/perps/coti.json">Deployment registry</a><a target="_blank" rel="noopener noreferrer" href="https://mainnet.cotiscan.io/address/0xbF318724218cED9A3ff7CfC642c71a0CA1952b0F">MultiAccount contract</a></div></footer>
     </main>
   </div>
 
   <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
   <aside class="drawer" id="drawer" aria-label="Account action" aria-modal="true" role="dialog" hidden>
-    <div class="drawer-top"><div><div class="overline">ON-CHAIN ACTION</div><h2 id="drawerTitle">Withdraw funds</h2></div><button class="icon-btn" id="closeDrawer" aria-label="Close">×</button></div>
-    <div class="drawer-body"><div class="account-ref"><span>Trading sub-account</span><code id="drawerAccount">—</code><span id="drawerAccountName"></span></div>
+    <div class="drawer-top"><div><div class="overline">TRANSACTION</div><h2 id="drawerTitle">Withdraw funds</h2></div><button class="icon-btn" id="closeDrawer" aria-label="Close">×</button></div>
+    <div class="drawer-body"><div class="account-ref"><span>Sub-account</span><code id="drawerAccount">--</code><span id="drawerAccountName"></span></div>
       <label for="actionMode">Transaction</label><select id="actionMode"><option value="direct">Direct withdrawal (legacy)</option><option value="request">Create classic withdrawal request</option><option value="deallocate">Deallocate idle margin</option></select>
       <div class="amount-heading"><label for="amountInput">Amount</label><button id="maxBtn" class="text-btn">Use max</button></div><div class="amount-wrap"><input id="amountInput" inputmode="decimal" autocomplete="off" placeholder="0.00"><span id="amountUnit">Collateral</span></div>
-      <div class="tx-facts"><div><span>Available</span><strong id="drawerAvailable">—</strong></div><div><span>Allocated</span><strong id="drawerAllocated">—</strong></div><div><span>Destination</span><code id="drawerDestination">—</code></div><div><span>Withdrawal cooldown</span><span id="drawerCooldown">—</span></div></div>
+      <div class="tx-facts"><div><span>Available</span><strong id="drawerAvailable">--</strong></div><div><span>Allocated</span><strong id="drawerAllocated">--</strong></div><div><span>Destination</span><code id="drawerDestination">--</code></div><div><span>Withdrawal cooldown</span><span id="drawerCooldown">--</span></div></div>
       <p class="drawer-desc" id="actionDescription"></p>
       <button id="previewBtn" class="btn secondary full">Simulate transaction</button>
       <div id="previewResult" class="preview-result" aria-live="polite"></div>
     </div>
-    <div class="drawer-footer"><button id="submitBtn" class="btn primary full" disabled>Confirm in wallet</button><p>Network fees are paid in COTI. No tokens are approved or delegated.</p></div>
+    <div class="drawer-footer"><button id="submitBtn" class="btn primary full" disabled>Confirm in wallet</button><p>Network fees are paid in COTI.</p></div>
   </aside>
   <noscript><div class="noscript">JavaScript is required for read-only blockchain queries and wallet transactions.</div></noscript>
 </body>

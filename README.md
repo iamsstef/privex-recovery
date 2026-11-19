@@ -2,7 +2,7 @@
 
 Independent, **unofficial**, static recovery/inspection tool for the legacy PriveX SYMMIO MultiAccount deployment on COTI Mainnet (chain ID `2632500`). No backend, cookies, analytics, API keys, or custody. Connect an injected EIP-1193 wallet (e.g. MetaMask/Rabby) or look up a public address without connecting.
 
-> **EXPERIMENTAL – NOT LIVE-CHAIN VALIDATED.** The implementation is based on published source and deployment registries; it has **not** been demonstrated to recover funds on the actual COTI deployment. Do not promote it as a proven recovery mechanism or encourage large withdrawals until an independent source/bytecode review and an end-to-end test with an account owner have succeeded. The public repository must be reviewed before users connect wallets.
+> **EXPERIMENTAL - NOT LIVE-CHAIN VALIDATED.** The implementation is based on published source and deployment registries; it has **not** been demonstrated to recover funds on the actual COTI deployment. Do not promote it as a proven recovery mechanism or encourage large withdrawals until an independent source/bytecode review and an end-to-end test with an account owner have succeeded. The public repository must be reviewed before users connect wallets.
 
 ## Deployed contracts referenced
 
@@ -17,10 +17,10 @@ The analytics configuration indicates **six collateral decimals**; the app verif
 
 Official contract source consulted:
 
-- [SYMMIO legacy MultiAccount](https://github.com/SYMM-IO/perps-core/blob/main/contracts/helpers/accounts/MultiAccount.sol) – `getAccounts`, `owners`, `_call`, `withdrawFromAccount`, delegation mappings and events.
-- [SYMMIO AccountFacetImpl](https://github.com/SYMM-IO/perps-core/blob/main/contracts/core/facets/Account/AccountFacetImpl.sol) – legacy withdrawal cooldown, deallocation and the `legacyWithdrawalDeprecated` check.
-- [SYMMIO v0.8.5 withdrawal documentation](https://github.com/SYMM-IO/perps-core/blob/main/docs/v0.8.5/withdraw-system.md) – classic withdrawal initiation/finalization without a service provider.
-- [SYMMIO WithdrawFacet](https://github.com/SYMM-IO/perps-core/blob/main/contracts/core/facets/Withdraw/WithdrawFacet.sol) – new withdrawal functions.
+- [SYMMIO legacy MultiAccount](https://github.com/SYMM-IO/perps-core/blob/main/contracts/helpers/accounts/MultiAccount.sol) - `getAccounts`, `owners`, `_call`, `withdrawFromAccount`, delegation mappings and events.
+- [SYMMIO AccountFacetImpl](https://github.com/SYMM-IO/perps-core/blob/main/contracts/core/facets/Account/AccountFacetImpl.sol) - legacy withdrawal cooldown, deallocation and the `legacyWithdrawalDeprecated` check.
+- [SYMMIO v0.8.5 withdrawal documentation](https://github.com/SYMM-IO/perps-core/blob/main/docs/v0.8.5/withdraw-system.md) - classic withdrawal initiation/finalization without a service provider.
+- [SYMMIO WithdrawFacet](https://github.com/SYMM-IO/perps-core/blob/main/contracts/core/facets/Withdraw/WithdrawFacet.sol) - new withdrawal functions.
 
 **Source compatibility does not prove deployed bytecode compatibility.** PriveX MultiAccount is upgradeable; its current implementation must be verified on an independent explorer / against a known transaction before public production use.
 
