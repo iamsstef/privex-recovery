@@ -13,9 +13,10 @@ test('PriveX MultiAccount v2 _call has no expected return data', () => {
   assert.equal(matches[0][0],"'function _call(address account,bytes[] callDatas)'");
 });
 
-test('owner calls still require static simulation and gas estimation', () => {
-  assert.match(app,/await action\.contract\[action\.method\]\.staticCall\(\.\.\.action\.args\)/);
-  assert.match(app,/await action\.contract\[action\.method\]\.estimateGas\(\.\.\.action\.args\)/);
+test('owner calls use raw simulation and gas estimation for MultiAccount v2', () => {
+  assert.match(app,/await window\.PrivexCalls\.simulate\(state\.walletProvider,action\.request\)/);
+  assert.match(app,/await window\.PrivexCalls\.estimateGas\(state\.walletProvider,action\.request\)/);
+  assert.match(app,/await signer\.sendTransaction\(action\.request\)/);
 });
 
 test('deallocation uses the owner-controlled MultiAccount wrapper', () => {
@@ -24,5 +25,10 @@ test('deallocation uses the owner-controlled MultiAccount wrapper', () => {
 });
 
 test('main script cache is updated on deployment', () => {
-  assert.match(html,/src="\.\/app\.js\?v=multiaccount-abi2"/);
+  assert.match(html,/src="\.\/app\.js\?v=multiaccount-raw3"/);
+});
+
+
+test('raw call helper loads before application', () => {
+  assert.match(html, /<script defer src="\.\/raw-call\.js\?v=1"><\/script>/);
 });

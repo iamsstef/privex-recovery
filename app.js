@@ -82,6 +82,11 @@
     node.textContent = message || '';
   }
   function failText(e) {
+    if (e?.code === 'BAD_DATA') {
+      const fn = e.info?.signature || e.info?.method || 'unknown contract read';
+      const raw = typeof e.value === 'string' ? e.value : '';
+      return `Invalid return data from ${fn}${raw === '0x' ? ' (empty 0x)' : ''}. Check deployed function and RPC.`;
+    }
     // Avoid dumping unbounded RPC payloads into the interface.
     let msg = e?.shortMessage || e?.reason || e?.info?.error?.message || e?.message || String(e);
     if (/user rejected|user denied|4001/i.test(msg)) return 'Transaction or wallet request was rejected.';
@@ -381,11 +386,13 @@
     return signer;
   }
 
-  async function buildAction() {
+  async function buildAction(onStage = () => {}) {
     const a=activeAccount();
     assert(a,'Choose an account first.');
+    onStage('Checking wallet and account');
     const signer=await assertWriteReady(a);
     const mode=currentMode();
+    onStage('Reading balances');
     const units=strictUnits($('amountInput').value);
     const units18=units*10n**BigInt(18-CONFIG.decimals);
     const [available,allocated] = await Promise.all([core().balanceOf(a.address),core().allocatedBalanceOfPartyA(a.address)]);
@@ -403,6 +410,7 @@
     }else if(mode==='deallocate') {
       assert(units18<=allocated,'Amount exceeds the allocated balance.');
       assert(window.PrivexMuon?.fetchSignature,'Muon client unavailable. Reload the page.');
+      onStage('Reading Muon settings');
       const [muonConfig,latest]=await Promise.all([c.getMuonConfig(),state.read.getBlock('latest')]);
       assert(latest,'Unable to read the latest COTI block.');
       const muonParams={
@@ -410,10 +418,12 @@
         blockTimestamp:latest.timestamp,upnlValidTime:muonConfig.upnlValidTime,
       };
       let oracle, deallocationMethod='safeDeallocate';
+      onStage('Requesting safe Muon signature');
       try {
         oracle=await window.PrivexMuon.fetchSignature(muonParams);
       }catch(primaryError){
         // Only use the legacy path if the core explicitly reports it is enabled.
+        onStage('Checking legacy deallocation status');
         let disabled;
         try { disabled=await core().isLegacyDeallocateDeprecated(); }
         catch(readError){
@@ -421,15 +431,29 @@
         }
         if(disabled) throw new Error(`Safe Muon failed: ${failText(primaryError)}. Legacy deallocation disabled on-chain.`);
         deallocationMethod='deallocate';
+        onStage('Requesting legacy Muon signature');
         try { oracle=await window.PrivexMuon.fetchSignature(muonParams,fetch,'uPnl_A'); }
         catch(fallbackError){
           throw new Error(`Safe Muon failed: ${failText(primaryError)}. Legacy Muon failed: ${failText(fallbackError)}`);
         }
       }
+      onStage('Encoding deallocation');
       const data=c.interface.encodeFunctionData(deallocationMethod,[units18,oracle.sig]);
       action={mode,contract:m,method:'_call',args:[a.address,[data]],target:CONFIG.multiAccount,oracle:oracle.gateway,deallocationMethod};
     }else throw new Error('Unsupported action.');
-    await action.contract[action.method].staticCall(...action.args); // eth_call: no funds move here
+    if (action.method === '_call') {
+      // PriveX MultiAccount version 2 returns no data. Use a raw eth_call so the
+      // provider does not attempt to ABI-decode return values from older contracts.
+      onStage('Encoding MultiAccount call');
+      assert(window.PrivexCalls?.makeRequest && window.PrivexCalls?.simulate, 'Raw call helper unavailable. Reload the page.');
+      action.request = window.PrivexCalls.makeRequest(m.interface,CONFIG.multiAccount,state.wallet,a.address,action.args[1]);
+    }
+    onStage('Simulating contract call');
+    if (action.request) {
+      await window.PrivexCalls.simulate(state.walletProvider,action.request);
+    } else {
+      await action.contract[action.method].staticCall(...action.args);
+    }
     return {...action,account:a.address,amount:units,wallet:state.wallet};
   }
 
@@ -439,16 +463,20 @@
     $('previewResult').textContent=currentMode()==='deallocate' ? 'Fetching Muon signature and simulating...' : 'Simulating transaction...';
     state.preview=null;
     $('previewBtn').disabled=true;
+    let stage='Preparing transaction';
     try {
-      const action=await buildAction();
-      const gas=await action.contract[action.method].estimateGas(...action.args);
+      const action=await buildAction(next=>{stage=next;});
+      stage='Estimating gas';
+      const gas=action.request
+        ? await window.PrivexCalls.estimateGas(state.walletProvider,action.request)
+        : await action.contract[action.method].estimateGas(...action.args);
       state.preview={account:action.account,wallet:action.wallet,mode:action.mode,amount:action.amount,deallocationMethod:action.deallocationMethod||null};
       $('previewResult').className='preview-result success';
       $('previewResult').textContent=`Simulation passed.\nAmount: ${fmtCollateral(action.amount)} ${state.meta.symbol}\nTo: ${action.mode==='deallocate'?'same sub-account':action.wallet}\nContract: ${ellipsis(action.target)}\nEstimated gas: ${gas.toString()}${action.deallocationMethod?'\nMethod: '+action.deallocationMethod:''}${action.oracle?'\nMuon: '+action.oracle:''}\nNo transaction has been sent.`;
       $('submitBtn').disabled=false;
     }catch(e){
       $('previewResult').className='preview-result error';
-      $('previewResult').textContent=`Simulation failed. No transaction sent.\n${failText(e)}`;
+      $('previewResult').textContent=`Simulation failed at ${stage}. No transaction sent.\n${failText(e)}`;
     }finally{$('previewBtn').disabled=false;}
   }
 
@@ -462,7 +490,11 @@
       assert(same(action.account,state.preview.account) && same(action.wallet,state.preview.wallet) && action.mode===state.preview.mode && action.amount===state.preview.amount && (action.deallocationMethod||null)===state.preview.deallocationMethod,'Transaction details changed. Please simulate again.');
       $('previewResult').className='preview-result';
       $('previewResult').textContent='Confirm the transaction shown by your wallet. Verify the contract and amount.';
-      const tx=await action.contract[action.method](...action.args);
+      const signer=await state.walletProvider.getSigner();
+      assert(same(await signer.getAddress(),state.wallet), 'Wallet account changed. Reconnect before signing.');
+      const tx=action.request
+        ? await signer.sendTransaction(action.request)
+        : await action.contract[action.method](...action.args);
       $('previewResult').textContent=`Transaction submitted: ${tx.hash}\nWaiting for a confirmed receipt…`;
       const receipt=await tx.wait(1);
       assert(receipt?.status===1,'Transaction was not successful.');
