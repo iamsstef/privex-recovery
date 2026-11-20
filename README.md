@@ -101,3 +101,11 @@ Run `node --test tests/*.test.cjs` for offline client checks. Live COTI executio
 ## Raw MultiAccount simulation (2026-11-20)
 
 A screenshot of the user's successful `uPnl_A` Muon response still showed `could not decode result data` in the browser, after the earlier no-output ABI change. The exact failing method was not visible. Owner-authorized `MultiAccount._call` transactions now use a manually encoded raw transaction and `eth_call` through the connected wallet provider. The successful `0x` result is accepted without ABI decoding; the same transaction must also pass `estimateGas` before the submit button is enabled. The app sends the same fixed-target transaction using the wallet signer, with a fresh Muon signature and a repeat preflight before submission. Failures now include the stage and show the failing ABI getter name when an ethers `BAD_DATA` error occurs. None of this establishes on-chain execution until a real transaction is confirmed.
+
+## Withdrawal cooldown and one-click actions (2026-11-20)
+
+SYMMIO's `getWithdrawableTime(subAccount)` gives the earliest time a legacy withdrawal can execute. The dashboard displays the Unix timestamp as a live, local-time countdown on each account and in the transaction drawer, as well as on pending classic withdrawal requests. Direct withdrawal stays disabled until its cooldown expires. Before sending, the dashboard queries the on-chain cooldown again, checks it against COTI's latest block timestamp and runs a contract `eth_call` and gas estimation.
+
+The separate Simulate button has been removed. Clicking Withdraw, Deallocate or Create request starts these read-only checks automatically and opens the wallet only when they pass. Deallocation may still require Muon signatures. Classic requests can be created while the legacy withdrawal cooldown is active, but require separate finalization after their own cooldown.
+
+Countdowns are client-clock approximations only. On-chain contract checks determine eligibility and prevent an early withdrawal. These changes have not been tested against a successful real COTI withdrawal.

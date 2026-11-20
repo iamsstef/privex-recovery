@@ -7,3 +7,10 @@
 .compact-hero .notice{max-width:760px}
 
 .account-warning{margin:9px 0 2px;font-size:11px;color:var(--amber);line-height:1.5}
+
+/* Cooldown status */
+.account-cooldown{font-size:11px;color:var(--amber);line-height:1.45;font-variant-numeric:tabular-nums;white-space:nowrap}
+.account-cooldown.ready{color:var(--accent)}
+.cooldown-value{display:flex;flex-direction:column;align-items:flex-end;gap:3px;text-align:right;min-width:0}
+.cooldown-value strong{font-size:13px;font-weight:600;color:var(--accent);font-variant-numeric:tabular-nums}
+.cooldown-value small{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}

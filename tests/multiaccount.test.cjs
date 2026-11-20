@@ -25,10 +25,29 @@ test('deallocation uses the owner-controlled MultiAccount wrapper', () => {
 });
 
 test('main script cache is updated on deployment', () => {
-  assert.match(html,/src="\.\/app\.js\?v=multiaccount-raw3"/);
+  assert.match(html,/src="\.\/app\.js\?v=withdrawal-cooldown4"/);
 });
 
 
 test('raw call helper loads before application', () => {
   assert.match(html, /<script defer src="\.\/raw-call\.js\?v=1"><\/script>/);
+});
+
+test('cooldown module loads before app',()=>{
+  assert.match(html, /<script defer src="\.\/cooldown\.js\?v=1"><\/script>/);
+});
+test('no mandatory manual simulation remains',()=>{
+  assert.doesNotMatch(html, /id="previewBtn"/);
+  assert.doesNotMatch(app, /state\.preview|simulateAction/);
+  assert.match(app, /await buildAction\(next=>/);
+  assert.match(app, /await window\.PrivexCalls\.estimateGas\(state\.walletProvider,action\.request\)/);
+});
+test('direct withdrawal re-checks live cooldown before signing',()=>{
+  assert.match(app, /core\(\)\.getWithdrawableTime\(a\.address,\{blockTag:latestBlock\.number\}\)/);
+  assert.match(app, /liveCooldown<=BigInt\(latestBlock\.timestamp\)/);
+});
+test('account and request cooldown elements update on a timer',()=>{
+  assert.match(app, /data-cooldown-kind="account"/);
+  assert.match(app, /data-cooldown-kind="request"/);
+  assert.match(app, /setInterval\(tickCountdowns,1000\)/);
 });

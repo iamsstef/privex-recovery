@@ -72,7 +72,7 @@
   const state = {
     eth: null, read: null, walletProvider: null, wallet: null,
     inspected: null, meta: null, accounts: [], selected: null,
-    preview: null, scanCancelled: false, activeScan: false, loading: false,
+    sending: false, scanCancelled: false, activeScan: false, loading: false,
   };
 
   function showStatus(message, tone = '') {
@@ -216,7 +216,7 @@
     state.loading = true;
     $('inspectBtn').disabled = true;
     $('refreshBtn').disabled = true;
-    state.preview = null;
+    
     showStatus('Loading accounts...');
     try {
       await verifyDeployment();
@@ -248,7 +248,7 @@
       showStatus(`${total} account${total===1?'':'s'} found.${caution}${warning}`, warning ? 'error' : 'success');
     } catch (e) {
       $('dashboard').hidden = true;
-      state.preview = null;
+      
       showStatus(failText(e),'error');
       setNetwork('COTI Mainnet',false);
     } finally {
@@ -285,6 +285,7 @@
     }
     if (accounts.some(a=>same(a.address,previous))) $('delegationAccount').value = previous;
     $('delegationResults').innerHTML = '<p class="empty-note">Scan events or check a known address. Partial scans may miss earlier delegations.</p>';
+    tickCountdowns();
   }
 
   function renderAccount(a,index) {
@@ -294,11 +295,14 @@
     const mayWrite = own && state.meta && !state.meta.isPaused && !state.meta.flags[0] && !state.meta.flags[2];
     const ownerNote = a.owner ? ellipsis(a.owner) : 'Unknown';
     const canDeallocate = mayWrite && a.allocated !== null && a.allocated > 0n;
+    const countdown = a.available !== null && a.available > 0n
+      ? `<span class="account-cooldown" data-cooldown-kind="account" data-deadline="${a.cooldown === null ? '' : a.cooldown.toString()}"></span>`
+      : '';
     const pending = a.requests.filter(r=>r.status === 0n || r.status === 1n || r.status === 4n || r.status === 6n);
     element.innerHTML = `
       <div class="account-top"><div><div class="account-title">${H(a.name)}</div><div class="account-address">${H(a.address)}</div></div></div>
       <div class="account-numbers"><div><small>Available</small><strong>${fmtAmount(a.available)}</strong></div><div><small>Allocated</small><strong>${fmtAmount(a.allocated)}</strong></div><div><small>Open positions</small><strong>${a.positions===null?'Unknown':a.positions.toString()}</strong></div></div>
-      <div class="account-bottom"><span class="meta">Owner: ${H(ownerNote)}${a.suspended?' · Suspended':''} · Pending quotes: ${a.pendingQuotes===null?'?':a.pendingQuotes}</span><button class="btn secondary" data-action="deallocate" ${canDeallocate?'':'disabled'}>Deallocate</button><button class="btn primary" data-action="direct" ${mayWrite && a.available!==null && a.available>0n?'':'disabled'}>Withdraw</button></div>
+      <div class="account-bottom"><span class="meta">Owner: ${H(ownerNote)}${a.suspended?' · Suspended':''} · Pending quotes: ${a.pendingQuotes===null?'?':a.pendingQuotes}</span>${countdown}<button class="btn secondary" data-action="deallocate" ${canDeallocate?'':'disabled'}>Deallocate</button><button class="btn primary" data-action="direct" ${mayWrite && a.available!==null && a.available>0n?'':'disabled'}>Withdraw</button></div>
       ${pending.length?`<div class="pending-requests"><div class="pending-header">Withdrawal requests (${pending.length} of ${a.lastRequest?.toString()||'?' } total)</div></div>`:''}`;
     const bottom = element.querySelector('.account-bottom');
     bottom.querySelectorAll('button').forEach(btn => btn.addEventListener('click',()=>openAction(a,btn.dataset.action)));
@@ -322,53 +326,113 @@
     const item = document.createElement('div');
     item.className='request-row';
     const safe = classicRequestToOwner(a,req);
-    const ready = safe && req.status===0n && Number(req.cooldownEndTime)*1000 <= Date.now();
-    item.innerHTML = `<div><strong>Request #${H(req.id.toString())}</strong><div class="request-hint">${H(STATUS[Number(req.status)] || 'Unknown')} · ${fmtCollateral(req.totalAmount)} ${H(state.meta.symbol)} · ${fmtTime(req.cooldownEndTime)}</div></div><button class="btn secondary" ${ready?'':'disabled'}>Finalize</button>`;
+    const finalizable = safe && req.status===0n;
+    const deadline = req.cooldownEndTime.toString();
+    const ready = finalizable && window.PrivexCooldown.secondsRemaining(deadline)===0;
+    item.innerHTML = `<div><strong>Request #${H(req.id.toString())}</strong><div class="request-hint">${H(STATUS[Number(req.status)] || 'Unknown')} · ${fmtCollateral(req.totalAmount)} ${H(state.meta.symbol)} · <span data-cooldown-kind="request" data-deadline="${deadline}"></span></div></div><button class="btn secondary" data-can-finalize="${finalizable?'1':'0'}" ${ready?'':'disabled'}>Finalize</button>`;
     item.querySelector('button').addEventListener('click',()=>finalizeRequest(a,req.id));
-    if (!safe) item.querySelector('button').title = 'Only classic requests paying the connected owner are enabled in this interface.';
+    if(!safe) item.querySelector('button').title='Only classic requests paying the connected owner can be finalized.';
     return item;
   }
 
   function openAction(a,mode) {
-    if (!state.wallet) { showStatus('Connect the owning wallet to authorize transactions.','error'); return; }
-    if (!a.owner || !same(a.owner,state.wallet)) { showStatus('The connected wallet does not own this sub-account.','error'); return; }
+    if(state.sending){showStatus('A transaction is already processing.','error');return;}
+    if(!state.wallet){showStatus('Connect the owning wallet.','error');return;}
+    if(!a.owner || !same(a.owner,state.wallet)){showStatus('Connected wallet does not own this sub-account.','error');return;}
     state.selected = a.address;
-    state.preview = null;
     $('drawerTitle').textContent = mode==='deallocate' ? 'Deallocate margin' : 'Withdraw funds';
     $('drawerAccount').textContent = a.address;
     $('drawerAccountName').textContent = a.name;
     $('actionMode').value = mode;
-    $('amountInput').value = '';
-    $('previewResult').textContent='';
-    $('previewResult').className='preview-result';
-    $('submitBtn').disabled = true;
+    $('amountInput').value = maxInput(mode==='deallocate' ? a.allocated : a.available);
+    $('previewResult').textContent = '';
+    $('previewResult').className = 'preview-result';
     $('drawer').hidden=false;
     $('drawerBackdrop').hidden=false;
     document.body.style.overflow='hidden';
     refreshDrawer();
     $('amountInput').focus();
   }
-  function closeDrawer(){ $('drawer').hidden=true; $('drawerBackdrop').hidden=true; document.body.style.overflow=''; state.preview=null; }
+  function closeDrawer(){ $('drawer').hidden=true; $('drawerBackdrop').hidden=true; document.body.style.overflow=''; }
   function activeAccount(){ return state.accounts.find(a=>same(a.address,state.selected)) ?? null; }
   function currentMode(){ return $('actionMode').value; }
+  function remainingUntil(deadline,now=Date.now()){
+    return window.PrivexCooldown?.secondsRemaining(deadline,now) ?? null;
+  }
+  function timeLabel(seconds){
+    return window.PrivexCooldown?.formatRemaining(seconds) ?? 'Unavailable';
+  }
   function refreshDrawer(){
     const a=activeAccount();
     if(!a)return;
     const mode=currentMode();
-    $('drawerTitle').textContent = mode==='deallocate'?'Deallocate idle margin':mode==='request'?'Create withdrawal request':'Direct withdrawal';
+    $('drawerTitle').textContent = mode==='deallocate'?'Deallocate margin':mode==='request'?'Create withdrawal request':'Direct withdrawal';
     $('drawerAvailable').textContent = `${fmtAmount(a.available,6)} ${state.meta.symbol}`;
     $('drawerAllocated').textContent = `${fmtAmount(a.allocated,6)} ${state.meta.symbol}`;
-    $('drawerDestination').textContent = mode==='deallocate'?'Same trading account':ellipsis(state.wallet);
-    $('drawerCooldown').textContent = a.cooldown === null ? 'Unknown' : (Number(a.cooldown)*1000 <= Date.now() ? 'Elapsed' : `Until ${fmtTime(a.cooldown)}`);
+    $('drawerDestination').textContent = mode==='deallocate'?'Same sub-account':ellipsis(state.wallet);
     $('amountUnit').textContent=state.meta.symbol;
     $('actionDescription').textContent = mode==='deallocate'
-      ? 'Requires a Muon signature. The legacy route is tried only if enabled on-chain. Resets the withdrawal cooldown.'
+      ? 'Moves allocated margin to the available balance. Resets the withdrawal cooldown.'
       : mode==='request'
-        ? 'Creates a withdrawal request to your wallet. Funds remain locked until finalized or canceled. Requires a second transaction.'
-        : 'Legacy withdrawal to your connected wallet. If disabled, try a withdrawal request.';
-    state.preview=null;
-    $('submitBtn').disabled=true;
-    $('previewResult').textContent='';
+        ? 'Creates a withdrawal request. Funds remain locked until the cooldown ends and a second transaction finalizes it.'
+        : 'Withdraws available collateral to your wallet after the cooldown.';
+    tickCountdowns();
+  }
+  function updateSubmitState(now=Date.now()){
+    if($('drawer').hidden)return;
+    const a=activeAccount();
+    const button=$('submitBtn');
+    if(state.sending){
+      button.disabled=true;
+      button.textContent='Processing...';
+      return;
+    }
+    if(!a || !state.wallet){button.disabled=true;button.textContent='Connect wallet';return;}
+    const mode=currentMode();
+    let label=mode==='deallocate'?'Deallocate':mode==='request'?'Create request':'Withdraw';
+    let reason='';
+    const max=mode==='deallocate'?a.allocated:a.available;
+    if(max===null || max===undefined || max<=0n)reason='No available balance';
+    if(!reason){
+      try{
+        const units=strictUnits($('amountInput').value);
+        if(units*10n**BigInt(18-CONFIG.decimals)>max)reason='Amount exceeds balance';
+      }catch(_){reason='Enter an amount';}
+    }
+    if(!reason && mode==='direct'){
+      const left=remainingUntil(a.cooldown,now);
+      if(left===null)reason='Cooldown unavailable';
+      else if(left>0)reason=`Withdraw in ${timeLabel(left)}`;
+    }
+    if(!reason && a.suspended)reason='Account suspended';
+    if(!reason && (!a.owner || !same(a.owner,state.wallet)))reason='Not account owner';
+    if(!reason && (state.meta?.isPaused || state.meta?.flags?.[0] || state.meta?.flags?.[2]))reason='Contract paused';
+    button.disabled=Boolean(reason);
+    button.textContent=reason || label;
+    button.title=reason || '';
+  }
+  function tickCountdowns(){
+    const now=Date.now();
+    for(const node of document.querySelectorAll('[data-cooldown-kind]')){
+      const left=remainingUntil(node.dataset.deadline,now);
+      if(node.dataset.cooldownKind==='account'){
+        node.textContent=left===null?'Cooldown unavailable':left===0?'Withdrawal ready':`Withdraw in ${timeLabel(left)}`;
+        node.classList.toggle('ready',left===0);
+      }else if(node.dataset.cooldownKind==='request'){
+        node.textContent=left===null?'Cooldown unavailable':left===0?'Ready to finalize':`In ${timeLabel(left)}`;
+        const button=node.closest('.request-row')?.querySelector('button');
+        if(button)button.disabled=button.dataset.canFinalize!=='1'||left!==0||state.sending;
+      }
+    }
+    if(!$('drawer').hidden){
+      const a=activeAccount();
+      if(a){
+        const left=remainingUntil(a.cooldown,now);
+        $('drawerCooldown').textContent=left===null?'Unavailable':timeLabel(left);
+        $('drawerCooldownUntil').textContent=left!==null && left>0 ? `Until ${fmtTime(a.cooldown)}` : '';
+      }
+      updateSubmitState(now);
+    }
   }
 
   async function assertWriteReady(a) {
@@ -401,6 +465,13 @@
     let action;
     if(mode==='direct') {
       assert(units18<=available,'Amount exceeds the currently free balance.');
+      onStage('Checking withdrawal cooldown');
+      const latestBlock=await state.read.getBlock('latest');
+      assert(latestBlock,'Unable to read COTI block time.');
+      const liveCooldown=await core().getWithdrawableTime(a.address,{blockTag:latestBlock.number});
+      a.cooldown=liveCooldown;
+      tickCountdowns();
+      assert(liveCooldown<=BigInt(latestBlock.timestamp),`Withdrawal available in ${timeLabel(remainingUntil(liveCooldown))} (until ${fmtTime(liveCooldown)}).`);
       action={mode,contract:m,method:'withdrawFromAccount',args:[a.address,units],target:CONFIG.multiAccount};
     }else if(mode==='request') {
       assert(units18<=available,'Amount exceeds the currently free balance.');
@@ -457,57 +528,55 @@
     return {...action,account:a.address,amount:units,wallet:state.wallet};
   }
 
-  async function simulateAction() {
-    $('submitBtn').disabled=true;
-    $('previewResult').className='preview-result';
-    $('previewResult').textContent=currentMode()==='deallocate' ? 'Fetching Muon signature and simulating...' : 'Simulating transaction...';
-    state.preview=null;
-    $('previewBtn').disabled=true;
+  async function sendAction() {
+    if(state.sending)return;
+    state.sending=true;
+    $('amountInput').disabled=true;
+    $('actionMode').disabled=true;
+    $('maxBtn').disabled=true;
+    tickCountdowns();
+    const result=$('previewResult');
+    result.className='preview-result';
     let stage='Preparing transaction';
+    result.textContent='Checking account...';
     try {
-      const action=await buildAction(next=>{stage=next;});
+      const action=await buildAction(next=>{
+        stage=next;
+        result.textContent=`${next}...`;
+      });
       stage='Estimating gas';
+      result.textContent='Estimating gas...';
       const gas=action.request
         ? await window.PrivexCalls.estimateGas(state.walletProvider,action.request)
         : await action.contract[action.method].estimateGas(...action.args);
-      state.preview={account:action.account,wallet:action.wallet,mode:action.mode,amount:action.amount,deallocationMethod:action.deallocationMethod||null};
-      $('previewResult').className='preview-result success';
-      $('previewResult').textContent=`Simulation passed.\nAmount: ${fmtCollateral(action.amount)} ${state.meta.symbol}\nTo: ${action.mode==='deallocate'?'same sub-account':action.wallet}\nContract: ${ellipsis(action.target)}\nEstimated gas: ${gas.toString()}${action.deallocationMethod?'\nMethod: '+action.deallocationMethod:''}${action.oracle?'\nMuon: '+action.oracle:''}\nNo transaction has been sent.`;
-      $('submitBtn').disabled=false;
-    }catch(e){
-      $('previewResult').className='preview-result error';
-      $('previewResult').textContent=`Simulation failed at ${stage}. No transaction sent.\n${failText(e)}`;
-    }finally{$('previewBtn').disabled=false;}
-  }
-
-  async function sendAction() {
-    if(!state.preview)return;
-    $('submitBtn').disabled=true;
-    $('previewBtn').disabled=true;
-    try {
-      // Re-simulate at the time of signing so stale account state never authorizes a different action.
-      const action=await buildAction();
-      assert(same(action.account,state.preview.account) && same(action.wallet,state.preview.wallet) && action.mode===state.preview.mode && action.amount===state.preview.amount && (action.deallocationMethod||null)===state.preview.deallocationMethod,'Transaction details changed. Please simulate again.');
-      $('previewResult').className='preview-result';
-      $('previewResult').textContent='Confirm the transaction shown by your wallet. Verify the contract and amount.';
+      assert(gas>0n,'Invalid gas estimate.');
+      stage='Wallet confirmation';
+      result.textContent='Confirm the transaction in your wallet.';
       const signer=await state.walletProvider.getSigner();
-      assert(same(await signer.getAddress(),state.wallet), 'Wallet account changed. Reconnect before signing.');
+      assert(same(await signer.getAddress(),state.wallet),'Wallet account changed. Reconnect before signing.');
       const tx=action.request
         ? await signer.sendTransaction(action.request)
         : await action.contract[action.method](...action.args);
-      $('previewResult').textContent=`Transaction submitted: ${tx.hash}\nWaiting for a confirmed receipt…`;
+      stage='Waiting for confirmation';
+      result.textContent=`Submitted: ${tx.hash}\nWaiting for confirmation...`;
       const receipt=await tx.wait(1);
       assert(receipt?.status===1,'Transaction was not successful.');
-      $('previewResult').className='preview-result success';
-      $('previewResult').textContent=`Confirmed on COTI Mainnet: ${tx.hash}\n${action.mode==='request'?'A withdrawal request was created. It still needs finalization after the cooldown.':action.mode==='deallocate'?'Collateral moved into the free balance, subject to the withdrawal cooldown.':'Direct withdrawal executed.'}`;
-      showStatus(`Confirmed on-chain transaction: ${CONFIG.explorer}/tx/${tx.hash}`,'success');
-      state.preview=null;
-      if(state.inspected) await inspect(state.inspected);
+      // The transaction succeeded. A later refresh error must never be shown as a failed transfer.
+      if(state.inspected){
+        try{await inspect(state.inspected);}catch(_){/* refresh can be retried */}
+      }
+      showStatus(`Transaction confirmed: ${CONFIG.explorer}/tx/${tx.hash}`,'success');
       closeDrawer();
     }catch(e){
-      $('previewResult').className='preview-result error';
-      $('previewResult').textContent=`No confirmed success: ${failText(e)}\nIf your wallet submitted a transaction, verify its hash on COTI Scan before retrying.`;
-    }finally{$('previewBtn').disabled=false;}
+      result.className='preview-result error';
+      result.textContent=`Failed at ${stage}.\n${failText(e)}\nIf a transaction was submitted, check COTI Scan before retrying.`;
+    }finally{
+      state.sending=false;
+      $('amountInput').disabled=false;
+      $('actionMode').disabled=false;
+      $('maxBtn').disabled=false;
+      tickCountdowns();
+    }
   }
 
   async function finalizeRequest(a,id) {
@@ -681,14 +750,22 @@
     $('closeDrawer').addEventListener('click',closeDrawer);
     $('drawerBackdrop').addEventListener('click',closeDrawer);
     document.addEventListener('keydown',e=>{if(e.key==='Escape' && !$('drawer').hidden)closeDrawer();});
-    $('actionMode').addEventListener('change',refreshDrawer);
-    $('amountInput').addEventListener('input',()=>{state.preview=null;$('submitBtn').disabled=true;$('previewResult').textContent='';});
-    $('maxBtn').addEventListener('click',()=>{
-      const a=activeAccount(); if(!a)return;
-      $('amountInput').value=maxInput(currentMode()==='deallocate'?a.allocated:a.available);
-      state.preview=null;$('submitBtn').disabled=true;$('previewResult').textContent='';
+    $('actionMode').addEventListener('change',()=>{
+      const a=activeAccount();
+      if(a)$('amountInput').value=maxInput(currentMode()==='deallocate'?a.allocated:a.available);
+      $('previewResult').textContent='';
+      refreshDrawer();
     });
-    $('previewBtn').addEventListener('click',simulateAction);
+    $('amountInput').addEventListener('input',()=>{
+      $('previewResult').textContent='';
+      updateSubmitState();
+    });
+    $('maxBtn').addEventListener('click',()=>{
+      const a=activeAccount();if(!a)return;
+      $('amountInput').value=maxInput(currentMode()==='deallocate'?a.allocated:a.available);
+      $('previewResult').textContent='';
+      updateSubmitState();
+    });
     $('submitBtn').addEventListener('click',sendAction);
     $('scanBtn').addEventListener('click',scanDelegations);
     $('stopScanBtn').addEventListener('click',()=>{state.scanCancelled=true;});
@@ -696,13 +773,13 @@
     const injected=window.ethereum;
     if(injected?.on){
       injected.on('accountsChanged',()=>{
-        state.wallet=null;state.walletProvider=null;state.preview=null;
+        state.wallet=null;state.walletProvider=null;
         closeDrawer();$('connectBtn').textContent='Connect wallet';$('connectBtn').className='btn primary';
         showStatus('Wallet account changed. Reconnect and refresh before any transaction.','error');
         $('dashboard').hidden=true;
       });
       injected.on('chainChanged',()=>{
-        state.wallet=null;state.walletProvider=null;state.read=null;state.meta=null;state.preview=null;
+        state.wallet=null;state.walletProvider=null;state.read=null;state.meta=null;
         closeDrawer();$('connectBtn').textContent='Connect wallet';$('connectBtn').className='btn primary';
         setNetwork('Network changed · reconnect',false);$('dashboard').hidden=true;
         showStatus('Wallet network changed. Reconnect on COTI Mainnet.','error');
@@ -712,6 +789,8 @@
 
   async function init(){
     wire();
+    setInterval(tickCountdowns,1000);
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)tickCountdowns();});
     try{
       await ensureRead();
       await verifyDeployment();
